@@ -1,0 +1,321 @@
+import pygame as pg
+import sys
+import random
+import math
+
+
+LARGURA, ALTURA = 600, 600
+
+
+class Estrela:
+    def __init__(self):
+        self.x = random.randint(0, LARGURA)
+        self.y = random.randint(0, ALTURA)
+        self.speed = random.uniform(0.5, 2.5)
+        self.raio = random.uniform(1, 2.5)
+        brilho = random.randint(120, 255)
+        self.cor = (brilho, brilho, brilho)
+
+    def update(self):
+        self.y += self.speed
+        if self.y > ALTURA:
+            self.y = 0
+            self.x = random.randint(0, LARGURA)
+
+    def draw(self, surface):
+        pg.draw.circle(surface, self.cor, (int(self.x), int(self.y)), self.raio)
+
+
+class Particula:
+    def __init__(self, x, y, cor):
+        self.x = x
+        self.y = y
+        ang = random.uniform(0, math.tau)
+        vel = random.uniform(2, 6)
+        self.vx = math.cos(ang) * vel
+        self.vy = math.sin(ang) * vel
+        self.vida = random.uniform(15, 30)
+        self.vida_max = self.vida
+        self.cor = cor
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vx *= 0.92
+        self.vy *= 0.92
+        self.vida -= 1
+
+    def viva(self):
+        return self.vida > 0
+
+    def draw(self, surface):
+        alpha = max(0, int(255 * (self.vida / self.vida_max)))
+        raio = max(1, int(5 * (self.vida / self.vida_max)))
+        s = pg.Surface((raio * 2, raio * 2), pg.SRCALPHA)
+        pg.draw.circle(s, (*self.cor, alpha), (raio, raio), raio)
+        surface.blit(s, (self.x - raio, self.y - raio))
+
+
+class Bala:
+    def __init__(self, player_x, player_y):  # atributos iniciais
+        self.pos = pg.Rect(player_x + 20, player_y, 10, 10)
+        self.speed = 15
+        self.color = (255, 240, 90)
+
+    def update(self):
+        self.pos.y -= self.speed
+
+    def draw(self, surface):
+        centro = self.pos.center
+        glow = pg.Surface((28, 28), pg.SRCALPHA)
+        pg.draw.circle(glow, (*self.color, 70), (14, 14), 14)
+        surface.blit(glow, (centro[0] - 14, centro[1] - 14))
+        pg.draw.circle(surface, self.color, centro, 6)
+        pg.draw.circle(surface, "white", centro, 2)
+
+
+class Inimigo:
+    def __init__(self, speed_bonus=0):  # atributos iniciais
+        self.pos = pg.Rect(random.randint(0, 540), 0, 60, 60)
+        self.speed = 3 + speed_bonus
+        self.cor_base = (200, 40, 40)
+        self.cor_sombra = (110, 15, 15)
+        self.cor_luz = (255, 120, 120)
+        self.angulo = random.uniform(0, 360)
+        self.giro = random.uniform(-2, 2)
+
+    def update(self):
+        self.pos.y += self.speed
+        self.angulo += self.giro
+
+    def draw(self, surface):
+        cx, cy = self.pos.center
+        raio = self.pos.width // 2
+        pontos = []
+        for i in range(8):
+            ang = math.radians(self.angulo + i * 45)
+            variacao = raio * (0.85 + 0.15 * math.sin(i * 2.3 + self.angulo))
+            pontos.append((cx + math.cos(ang) * variacao, cy + math.sin(ang) * variacao))
+        pg.draw.polygon(surface, self.cor_sombra, pontos)
+        pg.draw.polygon(surface, self.cor_base, [
+            (px - 2, py - 2) for px, py in pontos
+        ])
+        pg.draw.circle(surface, self.cor_luz, (cx - raio // 3, cy - raio // 3), raio // 4)
+        pg.draw.polygon(surface, (60, 0, 0), pontos, width=2)
+
+
+class Player:
+    def __init__(self):  # atributos iniciais
+        self.pos = pg.Rect(300, 300, 50, 50)
+        self.speed = 10
+        self.color = (80, 230, 255)
+
+    def handle_input(self):  # movimento do player
+        keys = pg.key.get_pressed()
+        if keys[pg.K_UP] and self.pos.top > 0:
+            self.pos.y -= self.speed
+        if keys[pg.K_DOWN] and self.pos.bottom < ALTURA:
+            self.pos.y += self.speed
+        if keys[pg.K_LEFT] and self.pos.left > 0:
+            self.pos.x -= self.speed
+        if keys[pg.K_RIGHT] and self.pos.right < LARGURA:
+            self.pos.x += self.speed
+
+    def draw(self, surface):  # renderizar o player
+        r = self.pos
+        nave = [
+            (r.centerx, r.top),
+            (r.right, r.bottom),
+            (r.centerx, r.bottom - 12),
+            (r.left, r.bottom),
+        ]
+        pg.draw.polygon(surface, self.color, nave)
+        pg.draw.polygon(surface, "white", nave, width=2)
+
+        flicker = 6 + int(4 * abs(math.sin(pg.time.get_ticks() / 60)))
+        chama = [
+            (r.centerx - 8, r.bottom - 10),
+            (r.centerx + 8, r.bottom - 10),
+            (r.centerx, r.bottom - 10 + flicker),
+        ]
+        pg.draw.polygon(surface, (255, 170, 40), chama)
+
+
+class Jogo:
+    MAX_VIDAS = 3
+
+    def __init__(self):
+        pg.init()
+        self.score = 0
+        self.vidas = self.MAX_VIDAS
+        self.game_over = False
+        self.screen = pg.display.set_mode((LARGURA, ALTURA))  # tela
+        pg.display.set_caption("Shot-Shot-Shot")  # título
+        self.clock = pg.time.Clock()  # ticks
+        self.running = True  # define se o jogo roda ou não
+        self.player = Player()  # para chamar a classe do player depois
+        self.balas = []  # conta as balas no cenário
+        self.inimigos = []  # conta os inimigos no cenário
+        self.particulas = []  # efeitos de explosão
+        self.estrelas = [Estrela() for _ in range(80)]  # fundo animado
+        self.tempo = 0  # contador de tempo (frames) para escalar dificuldade
+        self.SPAWN = pg.USEREVENT + 1
+        self.spawn_delay = 1500  # ms, diminui com o tempo
+        pg.time.set_timer(self.SPAWN, self.spawn_delay)
+        self.fonte = pg.font.SysFont(None, 36)
+        self.fonte_grande = pg.font.SysFont(None, 72)
+
+    def run(self):
+        while self.running:
+            self._check_events()  # Lida com fechar o jogo
+            if not self.game_over:
+                self._update()  # Lida com a lógica de movimento
+            for estrela in self.estrelas:
+                estrela.update()
+            for p in self.particulas[:]:
+                p.update()
+                if not p.viva():
+                    self.particulas.remove(p)
+            self._draw()  # Lida com o visual
+            self.clock.tick(60)  # tickspeed
+
+    def _speed_bonus(self):
+        # a cada 10s de jogo os inimigos ficam um pouco mais rápidos
+        return self.tempo // (60 * 10)
+
+    def _explodir(self, x, y, cor):
+        for _ in range(18):
+            self.particulas.append(Particula(x, y, cor))
+
+    def _check_events(self):
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                self.running = False
+                pg.quit()
+                sys.exit()
+            if event.type == pg.KEYDOWN:
+                if self.game_over:
+                    if event.key == pg.K_r:
+                        self._reiniciar()
+                elif event.key == pg.K_SPACE:
+                    nova_bala = Bala(self.player.pos.x, self.player.pos.y)
+                    self.balas.append(nova_bala)
+            if event.type == self.SPAWN and not self.game_over:
+                novo_inimigo = Inimigo(self._speed_bonus())
+                self.inimigos.append(novo_inimigo)
+
+    def _reiniciar(self):
+        self.score = 0
+        self.vidas = self.MAX_VIDAS
+        self.game_over = False
+        self.player = Player()
+        self.balas = []
+        self.inimigos = []
+        self.particulas = []
+        self.tempo = 0
+        self.spawn_delay = 1500
+        pg.time.set_timer(self.SPAWN, self.spawn_delay)
+
+    def _update(self):
+        self.tempo += 1
+        self.player.handle_input()  # fala para o player verificar os inputs
+
+        # spawn progressivo: a cada 3s o intervalo entre spawns diminui um pouco
+        novo_delay = max(400, 1500 - (self.tempo // 180) * 50)
+        if novo_delay != self.spawn_delay:
+            self.spawn_delay = novo_delay
+            pg.time.set_timer(self.SPAWN, self.spawn_delay)
+
+        for tiro in self.balas:
+            tiro.update()
+
+        for bicho in self.inimigos:
+            bicho.update()
+
+        for tiro in self.balas[:]:
+            if tiro.pos.bottom < 0:
+                self.balas.remove(tiro)
+
+        for bicho in self.inimigos[:]:
+            if bicho.pos.bottom > 630:
+                self.inimigos.remove(bicho)
+                self.score -= 10
+
+        for bicho in self.inimigos[:]:
+            for tiro in self.balas[:]:
+                if bicho.pos.colliderect(tiro.pos):
+                    if tiro in self.balas:
+                        self.balas.remove(tiro)
+                    if bicho in self.inimigos:
+                        self._explodir(*bicho.pos.center, bicho.cor_base)
+                        self.inimigos.remove(bicho)
+                        self.score += 100
+
+        for bicho in self.inimigos[:]:
+            if bicho.pos.colliderect(self.player.pos):
+                self._explodir(*bicho.pos.center, (255, 200, 80))
+                self.inimigos.remove(bicho)
+                self.vidas -= 1
+                if self.vidas <= 0:
+                    self.game_over = True
+
+    def _draw_coracao(self, surface, x, y, tamanho, cor):
+        r = tamanho // 4
+        pg.draw.circle(surface, cor, (x + r, y + r), r)
+        pg.draw.circle(surface, cor, (x + tamanho - r, y + r), r)
+        pg.draw.polygon(surface, cor, [
+            (x, y + r),
+            (x + tamanho, y + r),
+            (x + tamanho // 2, y + tamanho),
+        ])
+
+    def _draw(self):
+        self.screen.fill((6, 6, 20))  # fundo espacial escuro
+        for estrela in self.estrelas:
+            estrela.draw(self.screen)
+
+        for p in self.particulas:
+            p.draw(self.screen)
+
+        for bicho in self.inimigos:
+            bicho.draw(self.screen)
+
+        for tiro in self.balas:
+            tiro.draw(self.screen)
+
+        self.player.draw(self.screen)  # fala para o player renderizar
+
+        # painel do HUD
+        hud = pg.Surface((LARGURA, 60), pg.SRCALPHA)
+        hud.fill((0, 0, 0, 110))
+        self.screen.blit(hud, (0, 0))
+
+        texto_score = self.fonte.render(f"Score: {self.score}", True, "white")
+        self.screen.blit(texto_score, (14, 8))
+
+        for i in range(self.vidas):
+            self._draw_coracao(self.screen, 14 + i * 32, 34, 22, (230, 40, 70))
+
+        if self.game_over:
+            overlay = pg.Surface((LARGURA, ALTURA), pg.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            self.screen.blit(overlay, (0, 0))
+
+            texto_over = self.fonte_grande.render("GAME OVER", True, (255, 80, 80))
+            rect_over = texto_over.get_rect(center=(300, 260))
+            self.screen.blit(texto_over, rect_over)
+
+            texto_score_final = self.fonte.render(f"Score final: {self.score}", True, "white")
+            rect_score = texto_score_final.get_rect(center=(300, 310))
+            self.screen.blit(texto_score_final, rect_score)
+
+            texto_restart = self.fonte.render("Pressione R para reiniciar", True, (200, 200, 200))
+            rect_restart = texto_restart.get_rect(center=(300, 350))
+            self.screen.blit(texto_restart, rect_restart)
+
+        pg.display.flip()  # muda o buffer
+
+
+if __name__ == "__main__":
+    jogo = Jogo()
+    jogo.run()
